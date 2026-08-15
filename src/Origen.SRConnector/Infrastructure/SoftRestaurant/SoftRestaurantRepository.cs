@@ -120,22 +120,22 @@ public sealed class SoftRestaurantRepository(
 
     private static SaleHeader ReadHeader(SqlDataReader reader)
     {
-        var customerId = GetNullableString(reader, 5);
+        var customerId = GetNullableString(reader, 4);
         return new SaleHeader(
             reader.GetInt64(0),
             reader.GetInt64(1),
-                reader.GetDateTime(2),
-                reader.GetDateTime(3),
-                customerId is null ? null : new CustomerReference(customerId, GetNullableString(reader, 5)),
-                GetNullableString(reader, 6),
-                GetNullableString(reader, 7),
-                GetDecimalOrZero(reader, 8),
-                GetDecimalOrZero(reader, 9),
-                GetDecimalOrZero(reader, 10),
-                GetDecimalOrZero(reader, 11),
-                GetDecimalOrZero(reader, 12),
-                GetNullableString(reader, 13),
-                GetNullableString(reader, 14));
+            reader.GetDateTime(2),
+            reader.GetDateTime(3),
+            customerId is null ? null : new CustomerReference(customerId, GetNullableString(reader, 5)),
+            GetNullableString(reader, 6),
+            GetNullableString(reader, 7),
+            GetDecimalOrZero(reader, 8),
+            GetDecimalOrZero(reader, 9),
+            GetDecimalOrZero(reader, 10),
+            GetDecimalOrZero(reader, 11),
+            GetDecimalOrZero(reader, 12),
+            GetNullableString(reader, 13),
+            GetNullableString(reader, 14));
     }
 
     private static string? GetNullableString(SqlDataReader reader, int ordinal)
