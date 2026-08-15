@@ -171,13 +171,16 @@ public sealed class SqliteSaleOutboxRepository(
         await UpdateStatusAsync(id, "failed", null, nextAttempt, Truncate(error, 2000), cancellationToken);
     }
 
-    public async Task<OutboxCounts> GetCountsAsync(CancellationToken cancellationToken)
+    public async Task<OutboxStatus> GetStatusAsync(CancellationToken cancellationToken)
     {
         await InitializeAsync(cancellationToken);
         await using var connection = CreateConnection();
         await connection.OpenAsync(cancellationToken);
         await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT status, COUNT(*) FROM outbox_sales GROUP BY status;";
+        command.CommandText = """
+            SELECT status, COUNT(*) FROM outbox_sales GROUP BY status;
+            SELECT MAX(ticket_number), MAX(sent_at) FROM outbox_sales;
+            """;
         var counts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
@@ -185,11 +188,21 @@ public sealed class SqliteSaleOutboxRepository(
             counts[reader.GetString(0)] = reader.GetInt32(1);
         }
 
-        return new OutboxCounts(
+        var outboxCounts = new OutboxCounts(
             counts.GetValueOrDefault("pending"),
             counts.GetValueOrDefault("sending"),
             counts.GetValueOrDefault("sent"),
             counts.GetValueOrDefault("failed"));
+
+        long? lastTicket = null;
+        DateTimeOffset? lastSync = null;
+        if (await reader.NextResultAsync(cancellationToken) && await reader.ReadAsync(cancellationToken))
+        {
+            lastTicket = reader.IsDBNull(0) ? null : reader.GetInt64(0);
+            lastSync = ParseNullable(reader, 1);
+        }
+
+        return new OutboxStatus(outboxCounts, lastTicket, lastSync);
     }
 
     private async Task UpdateStatusAsync(

@@ -64,6 +64,22 @@ dotnet run --project src/Origen.SRConnector -- test-sql
 
 En caso de éxito muestra `SQL connection successful`. El comando ejecuta únicamente `SELECT 1`.
 
+## Consultar estado
+
+```powershell
+dotnet run --project src/Origen.SRConnector -- status
+```
+
+Muestra la conectividad SQL, el modo de API, conteos de la Outbox, el último ticket detectado y la última sincronización exitosa. En esta versión la API aparece como `Mock (HTTP disabled)`.
+
+Para verificar explícitamente el cliente configurado:
+
+```powershell
+dotnet run --project src/Origen.SRConnector -- test-api
+```
+
+El cliente mock no realiza ninguna solicitud HTTP.
+
 ## Ejecutar el polling
 
 ```powershell
@@ -90,7 +106,56 @@ dotnet publish src/Origen.SRConnector -c Release -r win-x64 --self-contained tru
 .\publish\origen-sr-connector.exe run
 ```
 
+La publicación `win-x64` genera un ejecutable autocontenido de un solo archivo. `appsettings.json` permanece junto al ejecutable. Coloque manualmente un `appsettings.Local.json` protegido junto al `.exe`; este archivo no se incluye automáticamente porque contiene secretos.
+
 Detenga el modo consola con `Ctrl+C`; el Worker respeta la cancelación y termina limpiamente.
+
+## Windows Service (preparado, no activar con la API mock en producción)
+
+No ejecute el servicio desde la carpeta de GitHub. Use una carpeta estable, por ejemplo:
+
+```text
+C:\Origen\SRConnector
+```
+
+Configure la Outbox del servicio fuera del código fuente:
+
+```json
+{
+  "Connector": {
+    "LocationId": "origen-playa",
+    "DatabasePath": "C:\\ProgramData\\Origen\\SRConnector\\connector.db",
+    "DispatchIntervalSeconds": 5,
+    "DispatchBatchSize": 20
+  }
+}
+```
+
+Primero pruebe el ejecutable publicado en consola. Después, en PowerShell como administrador, el servicio puede registrarse así:
+
+```powershell
+sc.exe create OrigenSRConnector binPath= '"C:\Origen\SRConnector\origen-sr-connector.exe" run' start= auto DisplayName= "Origen SR Connector"
+sc.exe description OrigenSRConnector "Conector de ventas SoftRestaurant a Origen Loyalty"
+sc.exe failure OrigenSRConnector reset= 86400 actions= restart/60000/restart/60000/restart/60000
+sc.exe start OrigenSRConnector
+sc.exe query OrigenSRConnector
+```
+
+Para detenerlo:
+
+```powershell
+sc.exe stop OrigenSRConnector
+```
+
+Para eliminar únicamente el registro del servicio después de detenerlo:
+
+```powershell
+sc.exe delete OrigenSRConnector
+```
+
+Los logs del servicio se consultan en **Visor de eventos → Registros de Windows → Aplicación**. La cuenta que ejecute el servicio debe tener acceso de lectura a SQL Server y escritura sobre la carpeta de `connector.db`. Si la cadena usa `Integrated Security=True`, la identidad del servicio necesita permisos SQL explícitos.
+
+El soporte se implementa mediante el Worker Service oficial de .NET y `Microsoft.Extensions.Hosting.WindowsServices`; el apagado del servicio propaga `CancellationToken` a ambos Workers.
 
 ## Garantía de sólo lectura
 
@@ -111,5 +176,6 @@ El repositorio además rechaza cualquier texto de comando que no comience con `S
 - Los renglones principales y modificadores se conservan individualmente.
 - `preciocatalogo` se publica como `unit_price`; `calcpreciomenosdescuento`, `iva`, `cardBrand`, mesa y usuarios se conservan en el modelo interno, pero no se incluyen en el payload conceptual actual.
 - `tempcheques.numcheque` se publica como `ticket` y es el identificador histórico global confirmado; `tempcheques.folio` se publica como `folio` y es el número operativo por turno. `WorkspaceId` no se consulta ni se publica.
-- TODO Fase 3: cliente HTTP, health/status y Windows Service.
+- SQL Server 2014 SP1 se conserva por compatibilidad obligatoria con SoftRestaurant; la negociación TLS 1.0 es una limitación conocida del entorno local.
+- TODO Fase 3: implementar el cliente HTTP y autenticación cuando se defina el contrato de Loyalty API.
 - TODO posterior al corte: confirmar identidad y relaciones en `cheques`, `chequespagos` y `vwrepproductosvendidoscheques` antes de implementar reconciliación histórica.

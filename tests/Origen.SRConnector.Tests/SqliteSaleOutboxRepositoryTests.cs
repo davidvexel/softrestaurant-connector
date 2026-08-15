@@ -17,8 +17,9 @@ public sealed class SqliteSaleOutboxRepositoryTests
         Assert.True(await repository.EnqueueAsync(TestSaleFactory.Create(), CancellationToken.None));
         Assert.False(await repository.EnqueueAsync(TestSaleFactory.Create(), CancellationToken.None));
 
-        var counts = await repository.GetCountsAsync(CancellationToken.None);
-        Assert.Equal(1, counts.Pending);
+        var status = await repository.GetStatusAsync(CancellationToken.None);
+        Assert.Equal(1, status.Counts.Pending);
+        Assert.Equal(1735, status.LastTicketDetected);
     }
 
     [Fact]
@@ -62,8 +63,8 @@ public sealed class SqliteSaleOutboxRepositoryTests
         Assert.True(await firstLocation.EnqueueAsync(TestSaleFactory.Create(), CancellationToken.None));
         Assert.True(await secondLocation.EnqueueAsync(TestSaleFactory.Create(), CancellationToken.None));
 
-        var counts = await firstLocation.GetCountsAsync(CancellationToken.None);
-        Assert.Equal(2, counts.Pending);
+        var status = await firstLocation.GetStatusAsync(CancellationToken.None);
+        Assert.Equal(2, status.Counts.Pending);
     }
 
     private static SqliteSaleOutboxRepository CreateRepository(

@@ -6,9 +6,9 @@ using Origen.SRConnector.Infrastructure.SoftRestaurant;
 using Origen.SRConnector.Services;
 using Origen.SRConnector.Workers;
 
-if (args.Length != 1 || args[0] is not ("run" or "test-sql"))
+if (args.Length != 1 || args[0] is not ("run" or "test-sql" or "test-api" or "status"))
 {
-    Console.Error.WriteLine("Usage: origen-sr-connector <run|test-sql>");
+    Console.Error.WriteLine("Usage: origen-sr-connector <run|test-sql|test-api|status>");
     return 2;
 }
 
@@ -35,6 +35,11 @@ builder.Services.AddSingleton<ISaleOutboxRepository, SqliteSaleOutboxRepository>
 builder.Services.AddSingleton<ILoyaltyApiClient, MockLoyaltyApiClient>();
 builder.Services.AddSingleton<ISaleSyncService, SaleSyncService>();
 builder.Services.AddSingleton<IOutboxDispatchService, OutboxDispatchService>();
+builder.Services.AddSingleton<ConnectorStatusService>();
+builder.Services.AddWindowsService(options =>
+{
+    options.ServiceName = "Origen SR Connector";
+});
 
 if (command == "run")
 {
@@ -50,6 +55,31 @@ try
         await host.Services.GetRequiredService<ISoftRestaurantRepository>()
             .TestConnectionAsync(CancellationToken.None);
         return 0;
+    }
+
+    if (command == "test-api")
+    {
+        var result = await host.Services.GetRequiredService<ILoyaltyApiClient>()
+            .TestConnectionAsync(CancellationToken.None);
+        Console.WriteLine(result.Success
+            ? "API client: Mock enabled (HTTP disabled; no request was made)"
+            : $"API client test failed: {result.Error}");
+        return result.Success ? 0 : 1;
+    }
+
+    if (command == "status")
+    {
+        var status = await host.Services.GetRequiredService<ConnectorStatusService>()
+            .GetStatusAsync(CancellationToken.None);
+        Console.WriteLine($"SQL Server: {status.SqlServer}");
+        Console.WriteLine($"API: {status.Api}");
+        Console.WriteLine($"Pending sales: {status.Outbox.Counts.Pending}");
+        Console.WriteLine($"Sending sales: {status.Outbox.Counts.Sending}");
+        Console.WriteLine($"Failed sales: {status.Outbox.Counts.Failed}");
+        Console.WriteLine($"Sent sales: {status.Outbox.Counts.Sent}");
+        Console.WriteLine($"Last sale detected: {status.Outbox.LastTicketDetected?.ToString() ?? "None"}");
+        Console.WriteLine($"Last successful sync: {status.Outbox.LastSuccessfulSync?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") ?? "Never"}");
+        return status.SqlServer == "Connected" ? 0 : 1;
     }
 
     await host.RunAsync();

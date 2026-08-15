@@ -42,6 +42,9 @@ public sealed class OutboxDispatchServiceTests
 
     private sealed class FailingApiClient : ILoyaltyApiClient
     {
+        public Task<ApiResult> TestConnectionAsync(CancellationToken cancellationToken) =>
+            Task.FromResult(ApiResult.Failed("Simulated API failure"));
+
         public Task<ApiResult> SendSaleAsync(Sale sale, CancellationToken cancellationToken) =>
             Task.FromResult(ApiResult.Failed("Simulated API failure"));
     }
@@ -75,8 +78,7 @@ public sealed class OutboxDispatchServiceTests
             return Task.CompletedTask;
         }
 
-        public Task<OutboxCounts> GetCountsAsync(CancellationToken cancellationToken) =>
-            Task.FromResult(new OutboxCounts(0, 0, 0, 1));
+        public Task<OutboxStatus> GetStatusAsync(CancellationToken cancellationToken) =>
+            Task.FromResult(new OutboxStatus(new OutboxCounts(0, 0, 0, 1), 1735, null));
     }
 }
-
