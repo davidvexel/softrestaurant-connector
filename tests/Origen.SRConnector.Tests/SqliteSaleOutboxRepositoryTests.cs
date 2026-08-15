@@ -1,3 +1,4 @@
+using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Origen.SRConnector.Configuration;
@@ -80,6 +81,9 @@ public sealed class SqliteSaleOutboxRepositoryTests
 
         public ValueTask DisposeAsync()
         {
+            // Microsoft.Data.Sqlite conserva conexiones físicas en el pool. Windows no permite
+            // eliminar el archivo temporal hasta liberar esos handles.
+            SqliteConnection.ClearAllPools();
             File.Delete(Path);
             File.Delete(Path + "-shm");
             File.Delete(Path + "-wal");
@@ -87,4 +91,3 @@ public sealed class SqliteSaleOutboxRepositoryTests
         }
     }
 }
-
