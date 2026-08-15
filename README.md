@@ -1,6 +1,6 @@
 # Origen SR Connector
 
-Primera versión del conector local de sólo lectura para SoftRestaurant 11. La Fase 1 consulta ventas cerradas recientes, carga sus pagos y productos por separado, construye el payload y lo escribe en los logs. Todavía no envía datos a una API ni mantiene estado local.
+Conector local de sólo lectura para SoftRestaurant 11. Consulta ventas cerradas recientes, carga sus pagos y productos por separado y guarda cada payload en una Outbox SQLite persistente. Un cliente mock procesa la cola y escribe el JSON en logs; todavía no llama a una API real.
 
 ## Requisitos
 
@@ -24,6 +24,12 @@ Ejemplo de archivo local (reemplace los valores según su instalación):
     "PollingIntervalSeconds": 10,
     "LookbackHours": 48,
     "CommandTimeoutSeconds": 30
+  },
+  "Connector": {
+    "LocationId": "origen-playa",
+    "DatabasePath": "C:\\Origen\\data\\connector.db",
+    "DispatchIntervalSeconds": 5,
+    "DispatchBatchSize": 20
   }
 }
 ```
@@ -64,7 +70,17 @@ En caso de éxito muestra `SQL connection successful`. El comando ejecuta única
 dotnet run --project src/Origen.SRConnector -- run
 ```
 
-El proceso consulta la ventana configurada en cada ciclo y escribe cada venta como JSON. En esta fase una misma venta aparecerá nuevamente en ciclos posteriores; la deduplicación y el Outbox persistente corresponden a la Fase 2.
+El proceso consulta la ventana configurada, inserta ventas nuevas en SQLite y procesa la Outbox mediante el cliente mock. Una venta ya registrada no se vuelve a insertar aunque aparezca en ciclos posteriores.
+
+En Windows se recomienda configurar `DatabasePath` con una ruta absoluta y persistente. La carpeta debe existir o poder ser creada por la identidad que ejecute el conector. No guarde `connector.db` en una carpeta temporal.
+
+La identidad local de cada venta es:
+
+```text
+source + location_id + ticket
+```
+
+Al iniciar, cualquier registro que hubiera quedado en estado `sending` se devuelve a `pending`. Los fallos se conservan y reintentan después de 1, 5, 15, 30 y 60 minutos; intentos posteriores mantienen una espera de 60 minutos.
 
 Para generar el ejecutable:
 
@@ -95,6 +111,5 @@ El repositorio además rechaza cualquier texto de comando que no comience con `S
 - Los renglones principales y modificadores se conservan individualmente.
 - `preciocatalogo` se publica como `unit_price`; `calcpreciomenosdescuento`, `iva`, `cardBrand`, mesa y usuarios se conservan en el modelo interno, pero no se incluyen en el payload conceptual actual.
 - `tempcheques.numcheque` se publica como `ticket` y es el identificador histórico global confirmado; `tempcheques.folio` se publica como `folio` y es el número operativo por turno. `WorkspaceId` no se consulta ni se publica.
-- TODO Fase 2: SQLite, Outbox, deduplicación y reintentos.
 - TODO Fase 3: cliente HTTP, health/status y Windows Service.
 - TODO posterior al corte: confirmar identidad y relaciones en `cheques`, `chequespagos` y `vwrepproductosvendidoscheques` antes de implementar reconciliación histórica.

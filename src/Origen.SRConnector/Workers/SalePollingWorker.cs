@@ -19,7 +19,7 @@ public sealed class SalePollingWorker(
         {
             try
             {
-                await syncService.DetectAndLogSalesAsync(stoppingToken);
+                await syncService.DetectAndQueueSalesAsync(stoppingToken);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
@@ -35,4 +35,3 @@ public sealed class SalePollingWorker(
         logger.LogInformation("Origen SR Connector stopped");
     }
 }
-

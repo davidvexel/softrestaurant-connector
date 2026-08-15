@@ -14,5 +14,8 @@ public static class SaleJsonSerializer
     };
 
     public static string Serialize(Sale sale) => JsonSerializer.Serialize(sale, Options);
-}
 
+    public static Sale Deserialize(string json) =>
+        JsonSerializer.Deserialize<Sale>(json, Options)
+        ?? throw new JsonException("The persisted sale payload is empty or invalid.");
+}

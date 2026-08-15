@@ -1,5 +1,7 @@
 using Microsoft.Extensions.Options;
 using Origen.SRConnector.Configuration;
+using Origen.SRConnector.Infrastructure.Api;
+using Origen.SRConnector.Infrastructure.Persistence;
 using Origen.SRConnector.Infrastructure.SoftRestaurant;
 using Origen.SRConnector.Services;
 using Origen.SRConnector.Workers;
@@ -22,13 +24,22 @@ builder.Services
     .ValidateDataAnnotations()
     .ValidateOnStart();
 builder.Services.Configure<ApiOptions>(builder.Configuration.GetSection(ApiOptions.SectionName));
-builder.Services.Configure<ConnectorOptions>(builder.Configuration.GetSection(ConnectorOptions.SectionName));
+builder.Services
+    .AddOptions<ConnectorOptions>()
+    .Bind(builder.Configuration.GetSection(ConnectorOptions.SectionName))
+    .ValidateDataAnnotations()
+    .ValidateOnStart();
 builder.Services.AddSingleton<ISoftRestaurantRepository, SoftRestaurantRepository>();
+builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddSingleton<ISaleOutboxRepository, SqliteSaleOutboxRepository>();
+builder.Services.AddSingleton<ILoyaltyApiClient, MockLoyaltyApiClient>();
 builder.Services.AddSingleton<ISaleSyncService, SaleSyncService>();
+builder.Services.AddSingleton<IOutboxDispatchService, OutboxDispatchService>();
 
 if (command == "run")
 {
     builder.Services.AddHostedService<SalePollingWorker>();
+    builder.Services.AddHostedService<OutboxDispatchWorker>();
 }
 
 try
