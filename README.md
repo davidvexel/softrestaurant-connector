@@ -106,7 +106,7 @@ dotnet publish src/Origen.SRConnector -c Release -r win-x64 --self-contained tru
 .\publish\origen-sr-connector.exe run
 ```
 
-La publicación `win-x64` genera un ejecutable autocontenido de un solo archivo. `appsettings.json` permanece junto al ejecutable. Coloque manualmente un `appsettings.Local.json` protegido junto al `.exe`; este archivo no se incluye automáticamente porque contiene secretos.
+La publicación `win-x64` genera un ejecutable autocontenido de un solo archivo. `appsettings.json` permanece junto al ejecutable. Coloque manualmente un `appsettings.Local.json` protegido junto al `.exe`; este archivo no se incluye automáticamente porque contiene secretos. La aplicación siempre resuelve ambos archivos desde la carpeta del ejecutable, aunque PowerShell o Windows Service utilicen otro directorio de trabajo.
 
 Detenga el modo consola con `Ctrl+C`; el Worker respeta la cancelación y termina limpiamente.
 

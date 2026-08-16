@@ -13,7 +13,13 @@ if (args.Length != 1 || args[0] is not ("run" or "test-sql" or "test-api" or "st
 }
 
 var command = args[0];
-var builder = Host.CreateApplicationBuilder(args);
+var builder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings
+{
+    Args = args,
+    // La configuración debe resolverse junto al ejecutable, no desde el directorio
+    // de trabajo elegido por PowerShell o por Windows Service.
+    ContentRootPath = AppContext.BaseDirectory
+});
 builder.Configuration.AddJsonFile("appsettings.Local.json", optional: true, reloadOnChange: true);
 // Se agrega nuevamente para que las variables de entorno tengan prioridad sobre el archivo local.
 builder.Configuration.AddEnvironmentVariables();
