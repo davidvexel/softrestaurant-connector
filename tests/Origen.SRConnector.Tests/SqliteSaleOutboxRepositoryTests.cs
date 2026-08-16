@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Origen.SRConnector.Configuration;
 using Origen.SRConnector.Infrastructure.Persistence;
+using Origen.SRConnector.Services;
 
 namespace Origen.SRConnector.Tests;
 
