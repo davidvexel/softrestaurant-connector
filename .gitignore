@@ -6,3 +6,4 @@ appsettings.Local.json
 connector.db*
 outbox-debug/
 .DS_Store
+origen-platform/
