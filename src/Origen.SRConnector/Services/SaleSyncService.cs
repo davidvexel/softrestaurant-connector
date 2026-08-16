@@ -15,13 +15,13 @@ public sealed class SaleSyncService(
     {
         var since = DateTime.Now.AddHours(-options.Value.LookbackHours);
         var sales = await repository.GetClosedSalesAsync(since, cancellationToken);
-        logger.LogInformation("Found {SaleCount} closed sales since {Since}", sales.Count, since);
+        logger.LogDebug("Found {SaleCount} closed sales since {Since}", sales.Count, since);
 
         foreach (var sale in sales)
         {
             if (sale.Items.Count == 0 || sale.Payments.Count == 0)
             {
-                logger.LogWarning(
+                logger.LogDebug(
                     "Sale {TicketNumber} is closed but incomplete ({ItemCount} items, {PaymentCount} payments); it will be checked again",
                     sale.TicketNumber,
                     sale.Items.Count,
