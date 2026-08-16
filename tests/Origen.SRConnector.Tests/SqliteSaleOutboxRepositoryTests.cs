@@ -86,6 +86,29 @@ public sealed class SqliteSaleOutboxRepositoryTests
         Assert.Equal(1, (await repository.GetStatusAsync(CancellationToken.None)).Counts.Failed);
     }
 
+    [Fact]
+    public async Task CorrectedPayload_RequeuesPermanentlyFailedSale()
+    {
+        await using var database = new TemporaryDatabase();
+        var repository = CreateRepository(database.Path);
+        var incompleteSale = TestSaleFactory.Create() with { Payments = [] };
+        await repository.EnqueueAsync(incompleteSale, CancellationToken.None);
+        var failed = Assert.Single(await repository.ClaimDueAsync(10, CancellationToken.None));
+        await repository.MarkFailedAsync(
+            failed.Id,
+            failed.Attempts,
+            "HTTP 422",
+            retryable: false,
+            cancellationToken: CancellationToken.None);
+
+        Assert.True(await repository.EnqueueAsync(TestSaleFactory.Create(), CancellationToken.None));
+        var retried = Assert.Single(await repository.ClaimDueAsync(10, CancellationToken.None));
+
+        Assert.Equal(failed.Id, retried.Id);
+        Assert.Equal(1, retried.Attempts);
+        Assert.Single(SaleJsonSerializer.Deserialize(retried.PayloadJson).Payments);
+    }
+
     private static SqliteSaleOutboxRepository CreateRepository(
         string path,
         string locationId = "origen-playa") => new(

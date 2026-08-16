@@ -19,6 +19,16 @@ public sealed class SaleSyncService(
 
         foreach (var sale in sales)
         {
+            if (sale.Items.Count == 0 || sale.Payments.Count == 0)
+            {
+                logger.LogWarning(
+                    "Sale {TicketNumber} is closed but incomplete ({ItemCount} items, {PaymentCount} payments); it will be checked again",
+                    sale.TicketNumber,
+                    sale.Items.Count,
+                    sale.Payments.Count);
+                continue;
+            }
+
             if (await outboxRepository.EnqueueAsync(sale, cancellationToken))
             {
                 logger.LogInformation("Sale {TicketNumber} queued", sale.TicketNumber);

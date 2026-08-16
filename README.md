@@ -115,6 +115,8 @@ source + location_id + ticket
 
 Al iniciar, cualquier registro que hubiera quedado en estado `sending` se devuelve a `pending`. Timeouts, HTTP `408`, `429`, `5xx` y errores de red se reintentan después de 1, 5, 15, 30 y 60 minutos; intentos posteriores mantienen una espera de 60 minutos. Rechazos permanentes como `400`, `401`, `403`, `409` y `422` quedan en `failed` para revisión manual y no se reintentan automáticamente.
 
+SoftRestaurant puede marcar un cheque como cerrado unos segundos antes de que sus pagos estén disponibles. Una venta sin productos o pagos no se encola; se vuelve a leer en el siguiente polling. Si un payload incompleto ya hubiera sido rechazado permanentemente, la Outbox lo reactiva únicamente cuando el payload persistido cambia con la información faltante.
+
 Para generar el ejecutable:
 
 ```powershell

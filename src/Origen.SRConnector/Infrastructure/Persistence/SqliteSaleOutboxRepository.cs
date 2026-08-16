@@ -84,7 +84,17 @@ public sealed class SqliteSaleOutboxRepository(
             INSERT INTO outbox_sales (
                 source, location_id, ticket_number, payload_json, status, attempts, created_at)
             VALUES (@source, @locationId, @ticket, @payload, 'pending', 0, @createdAt)
-            ON CONFLICT(source, location_id, ticket_number) DO NOTHING;
+            ON CONFLICT(source, location_id, ticket_number) DO UPDATE SET
+                payload_json = excluded.payload_json,
+                status = 'pending',
+                attempts = 0,
+                last_attempt_at = NULL,
+                next_attempt_at = NULL,
+                sent_at = NULL,
+                last_error = NULL
+            WHERE outbox_sales.status = 'failed'
+              AND outbox_sales.next_attempt_at IS NULL
+              AND outbox_sales.payload_json <> excluded.payload_json;
             """;
         command.Parameters.AddWithValue("@source", sale.Source);
         command.Parameters.AddWithValue("@locationId", _options.LocationId);
