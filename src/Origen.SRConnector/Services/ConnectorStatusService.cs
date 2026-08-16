@@ -26,7 +26,8 @@ public sealed class ConnectorStatusService(
         var outbox = await outboxRepository.GetStatusAsync(cancellationToken);
         return new ConnectorStatus(
             sqlStatus,
-            apiResult.Success ? "Mock (HTTP disabled)" : "Failed",
+            apiResult.Success ? $"{apiClient.Name}: Connected" : $"{apiClient.Name}: Failed",
+            apiResult.Success,
             outbox);
     }
 }
@@ -34,4 +35,5 @@ public sealed class ConnectorStatusService(
 public sealed record ConnectorStatus(
     string SqlServer,
     string Api,
+    bool ApiConnected,
     OutboxStatus Outbox);

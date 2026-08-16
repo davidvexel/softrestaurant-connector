@@ -5,6 +5,8 @@ namespace Origen.SRConnector.Infrastructure.Api;
 
 public sealed class MockLoyaltyApiClient(ILogger<MockLoyaltyApiClient> logger) : ILoyaltyApiClient
 {
+    public string Name => "Mock (HTTP disabled)";
+
     public Task<ApiResult> TestConnectionAsync(CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();

@@ -1,6 +1,6 @@
 # Origen SR Connector
 
-Conector local de sólo lectura para SoftRestaurant 11. Consulta ventas cerradas recientes, carga sus pagos y productos por separado y guarda cada payload en una Outbox SQLite persistente. Un cliente mock procesa la cola y escribe el JSON en logs; todavía no llama a una API real.
+Conector local de sólo lectura para SoftRestaurant 11. Consulta ventas cerradas recientes, carga sus pagos y productos por separado, guarda cada payload en una Outbox SQLite persistente y lo envía por HTTPS a Origen Platform. También conserva un modo mock para desarrollo.
 
 ## Requisitos
 
@@ -25,6 +25,12 @@ Ejemplo de archivo local (reemplace los valores según su instalación):
     "LookbackHours": 48,
     "CommandTimeoutSeconds": 30
   },
+  "Api": {
+    "Mode": "Http",
+    "BaseUrl": "https://app.origennatural.mx/",
+    "ApiKey": "orp_TOKEN_DEL_AMBIENTE",
+    "TimeoutSeconds": 20
+  },
   "Connector": {
     "LocationId": "origen-playa",
     "DatabasePath": "C:\\Origen\\data\\connector.db",
@@ -42,9 +48,20 @@ La configuración de .NET usa doble guion bajo para propiedades anidadas:
 $env:SoftRestaurant__ConnectionString = "Server=SERVIDOR;Database=NOMBRE_REAL;..."
 $env:SoftRestaurant__PollingIntervalSeconds = "10"
 $env:SoftRestaurant__LookbackHours = "48"
+$env:Api__Mode = "Http"
+$env:Api__BaseUrl = "https://app.origennatural.mx/"
+$env:Api__ApiKey = "orp_TOKEN_DEL_AMBIENTE"
 ```
 
 La aplicación nunca registra la cadena de conexión ni la API key. Aun así, prefiera un usuario SQL dedicado con permisos `SELECT` solamente.
+
+`Api:Mode` permanece en `Mock` dentro del archivo versionado como medida de seguridad. Active `Http` únicamente en `appsettings.Local.json` o mediante variables de entorno. El token Bearer sólo se adjunta a solicitudes HTTPS hacia los endpoints autenticados de Origen Platform.
+
+Para una primera prueba HTTP use una base nueva sin borrar la Outbox del mock, por ejemplo:
+
+```json
+"DatabasePath": "C:\\Users\\origen\\Documents\\GitHub\\softrestaurant-connector\\data\\connector-http-test.db"
+```
 
 ## Compilar y probar
 
@@ -70,7 +87,7 @@ En caso de éxito muestra `SQL connection successful`. El comando ejecuta única
 dotnet run --project src/Origen.SRConnector -- status
 ```
 
-Muestra la conectividad SQL, el modo de API, conteos de la Outbox, el último ticket detectado y la última sincronización exitosa. En esta versión la API aparece como `Mock (HTTP disabled)`.
+Muestra la conectividad SQL, el modo de API, conteos de la Outbox, el último ticket detectado y la última sincronización exitosa. La API aparece como `HTTP: Connected` cuando el health check público responde correctamente.
 
 Para verificar explícitamente el cliente configurado:
 
@@ -78,7 +95,7 @@ Para verificar explícitamente el cliente configurado:
 dotnet run --project src/Origen.SRConnector -- test-api
 ```
 
-El cliente mock no realiza ninguna solicitud HTTP.
+En modo `Http`, el comando llama a `GET /api/v1/connector` para validar dominio, HTTPS, token y sucursal; no envía ventas.
 
 ## Ejecutar el polling
 
@@ -86,7 +103,7 @@ El cliente mock no realiza ninguna solicitud HTTP.
 dotnet run --project src/Origen.SRConnector -- run
 ```
 
-El proceso consulta la ventana configurada, inserta ventas nuevas en SQLite y procesa la Outbox mediante el cliente mock. Una venta ya registrada no se vuelve a insertar aunque aparezca en ciclos posteriores.
+El proceso consulta la ventana configurada, inserta ventas nuevas en SQLite y procesa la Outbox mediante el cliente configurado. Una venta ya registrada no se vuelve a insertar aunque aparezca en ciclos posteriores.
 
 En Windows se recomienda configurar `DatabasePath` con una ruta absoluta y persistente. La carpeta debe existir o poder ser creada por la identidad que ejecute el conector. No guarde `connector.db` en una carpeta temporal.
 
@@ -96,7 +113,7 @@ La identidad local de cada venta es:
 source + location_id + ticket
 ```
 
-Al iniciar, cualquier registro que hubiera quedado en estado `sending` se devuelve a `pending`. Los fallos se conservan y reintentan después de 1, 5, 15, 30 y 60 minutos; intentos posteriores mantienen una espera de 60 minutos.
+Al iniciar, cualquier registro que hubiera quedado en estado `sending` se devuelve a `pending`. Timeouts, HTTP `408`, `429`, `5xx` y errores de red se reintentan después de 1, 5, 15, 30 y 60 minutos; intentos posteriores mantienen una espera de 60 minutos. Rechazos permanentes como `400`, `401`, `403`, `409` y `422` quedan en `failed` para revisión manual y no se reintentan automáticamente.
 
 Para generar el ejecutable:
 
@@ -110,7 +127,7 @@ La publicación `win-x64` genera un ejecutable autocontenido de un solo archivo.
 
 Detenga el modo consola con `Ctrl+C`; el Worker respeta la cancelación y termina limpiamente.
 
-## Windows Service (preparado, no activar con la API mock en producción)
+## Windows Service
 
 No ejecute el servicio desde la carpeta de GitHub. Use una carpeta estable, por ejemplo:
 
@@ -177,5 +194,5 @@ El repositorio además rechaza cualquier texto de comando que no comience con `S
 - `preciocatalogo` se publica como `unit_price`; `calcpreciomenosdescuento`, `iva`, `cardBrand`, mesa y usuarios se conservan en el modelo interno, pero no se incluyen en el payload conceptual actual.
 - `tempcheques.numcheque` se publica como `ticket` y es el identificador histórico global confirmado; `tempcheques.folio` se publica como `folio` y es el número operativo por turno. `WorkspaceId` no se consulta ni se publica.
 - SQL Server 2014 SP1 se conserva por compatibilidad obligatoria con SoftRestaurant; la negociación TLS 1.0 es una limitación conocida del entorno local.
-- TODO Fase 3: implementar el cliente HTTP y autenticación cuando se defina el contrato de Loyalty API.
+- La API real usa `POST https://app.origennatural.mx/api/v1/sales` con autenticación Bearer. `200` y `201` se consideran éxito.
 - TODO posterior al corte: confirmar identidad y relaciones en `cheques`, `chequespagos` y `vwrepproductosvendidoscheques` antes de implementar reconciliación histórica.

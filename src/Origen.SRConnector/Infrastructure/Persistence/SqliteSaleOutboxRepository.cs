@@ -111,8 +111,8 @@ public sealed class SqliteSaleOutboxRepository(
                 SELECT id, source, location_id, ticket_number, payload_json, status, attempts,
                        last_attempt_at, next_attempt_at, created_at, sent_at, last_error
                 FROM outbox_sales
-                WHERE status IN ('pending', 'failed')
-                  AND (next_attempt_at IS NULL OR next_attempt_at <= @now)
+                WHERE status = 'pending'
+                   OR (status = 'failed' AND next_attempt_at IS NOT NULL AND next_attempt_at <= @now)
                 ORDER BY created_at, id
                 LIMIT @limit;
                 """;
@@ -165,9 +165,16 @@ public sealed class SqliteSaleOutboxRepository(
             cancellationToken);
     }
 
-    public async Task MarkFailedAsync(long id, int attempts, string error, CancellationToken cancellationToken)
+    public async Task MarkFailedAsync(
+        long id,
+        int attempts,
+        string error,
+        bool retryable,
+        CancellationToken cancellationToken)
     {
-        var nextAttempt = timeProvider.GetUtcNow() + RetrySchedule.ForAttempt(attempts);
+        var nextAttempt = retryable
+            ? timeProvider.GetUtcNow() + RetrySchedule.ForAttempt(attempts)
+            : (DateTimeOffset?)null;
         await UpdateStatusAsync(id, "failed", null, nextAttempt, Truncate(error, 2000), cancellationToken);
     }
 

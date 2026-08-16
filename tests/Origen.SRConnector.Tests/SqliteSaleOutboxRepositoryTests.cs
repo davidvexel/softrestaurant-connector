@@ -67,6 +67,25 @@ public sealed class SqliteSaleOutboxRepositoryTests
         Assert.Equal(2, status.Counts.Pending);
     }
 
+    [Fact]
+    public async Task PermanentFailure_IsNotClaimedAgain()
+    {
+        await using var database = new TemporaryDatabase();
+        var repository = CreateRepository(database.Path);
+        await repository.EnqueueAsync(TestSaleFactory.Create(), CancellationToken.None);
+        var claimed = Assert.Single(await repository.ClaimDueAsync(10, CancellationToken.None));
+
+        await repository.MarkFailedAsync(
+            claimed.Id,
+            claimed.Attempts,
+            "HTTP 422",
+            retryable: false,
+            cancellationToken: CancellationToken.None);
+
+        Assert.Empty(await repository.ClaimDueAsync(10, CancellationToken.None));
+        Assert.Equal(1, (await repository.GetStatusAsync(CancellationToken.None)).Counts.Failed);
+    }
+
     private static SqliteSaleOutboxRepository CreateRepository(
         string path,
         string locationId = "origen-playa") => new(

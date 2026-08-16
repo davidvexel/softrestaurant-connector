@@ -25,7 +25,23 @@ public sealed class OutboxDispatchServiceTests
         Assert.Equal(1, processed);
         Assert.Equal(1, outbox.FailedId);
         Assert.Equal(1, outbox.FailedAttempts);
+        Assert.True(outbox.Retryable);
         Assert.Contains("simulated", outbox.Error, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task PermanentFailure_IsNotScheduledForRetry()
+    {
+        var outbox = new InMemoryOutbox();
+        var service = new OutboxDispatchService(
+            outbox,
+            new FailingApiClient(retryable: false),
+            Options.Create(new ConnectorOptions { LocationId = "origen-playa", DispatchBatchSize = 20 }),
+            NullLogger<OutboxDispatchService>.Instance);
+
+        await service.DispatchDueAsync(CancellationToken.None);
+
+        Assert.False(outbox.Retryable);
     }
 
     [Theory]
@@ -40,19 +56,26 @@ public sealed class OutboxDispatchServiceTests
         Assert.Equal(TimeSpan.FromMinutes(expectedMinutes), RetrySchedule.ForAttempt(attempt));
     }
 
-    private sealed class FailingApiClient : ILoyaltyApiClient
+    private sealed class FailingApiClient(bool retryable = true) : ILoyaltyApiClient
     {
+        public string Name => "Test";
+
         public Task<ApiResult> TestConnectionAsync(CancellationToken cancellationToken) =>
-            Task.FromResult(ApiResult.Failed("Simulated API failure"));
+            Task.FromResult(CreateFailure());
 
         public Task<ApiResult> SendSaleAsync(Sale sale, CancellationToken cancellationToken) =>
-            Task.FromResult(ApiResult.Failed("Simulated API failure"));
+            Task.FromResult(CreateFailure());
+
+        private ApiResult CreateFailure() => retryable
+            ? ApiResult.Retryable("Simulated API failure")
+            : ApiResult.Permanent("Simulated API failure");
     }
 
     private sealed class InMemoryOutbox : ISaleOutboxRepository
     {
         public long? FailedId { get; private set; }
         public int FailedAttempts { get; private set; }
+        public bool Retryable { get; private set; }
         public string Error { get; private set; } = string.Empty;
 
         public Task InitializeAsync(CancellationToken cancellationToken) => Task.CompletedTask;
@@ -70,11 +93,17 @@ public sealed class OutboxDispatchServiceTests
         }
 
         public Task MarkSentAsync(long id, CancellationToken cancellationToken) => Task.CompletedTask;
-        public Task MarkFailedAsync(long id, int attempts, string error, CancellationToken cancellationToken)
+        public Task MarkFailedAsync(
+            long id,
+            int attempts,
+            string error,
+            bool retryable,
+            CancellationToken cancellationToken)
         {
             FailedId = id;
             FailedAttempts = attempts;
             Error = error;
+            Retryable = retryable;
             return Task.CompletedTask;
         }
 

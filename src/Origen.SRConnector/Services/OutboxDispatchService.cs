@@ -27,7 +27,11 @@ public sealed class OutboxDispatchService(
                 }
                 else
                 {
-                    await MarkFailedAsync(entry, result.Error ?? "Unknown API error", cancellationToken);
+                    await MarkFailedAsync(
+                        entry,
+                        result.Error ?? "Unknown API error",
+                        result.FailureKind == ApiFailureKind.Retryable,
+                        cancellationToken);
                 }
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -36,7 +40,11 @@ public sealed class OutboxDispatchService(
             }
             catch (Exception exception)
             {
-                await MarkFailedAsync(entry, exception.Message, cancellationToken);
+                await MarkFailedAsync(
+                    entry,
+                    exception.Message,
+                    retryable: true,
+                    cancellationToken: cancellationToken);
             }
         }
 
@@ -46,13 +54,23 @@ public sealed class OutboxDispatchService(
     private async Task MarkFailedAsync(
         OutboxSale entry,
         string error,
+        bool retryable,
         CancellationToken cancellationToken)
     {
-        await outboxRepository.MarkFailedAsync(entry.Id, entry.Attempts, error, cancellationToken);
-        logger.LogWarning(
-            "Mock API unavailable; sale {TicketNumber} queued for retry after attempt {Attempt}",
-            entry.TicketNumber,
-            entry.Attempts);
+        await outboxRepository.MarkFailedAsync(entry.Id, entry.Attempts, error, retryable, cancellationToken);
+        if (retryable)
+        {
+            logger.LogWarning(
+                "API unavailable; sale {TicketNumber} queued for retry after attempt {Attempt}",
+                entry.TicketNumber,
+                entry.Attempts);
+        }
+        else
+        {
+            logger.LogError(
+                "API permanently rejected sale {TicketNumber}; manual review required: {Error}",
+                entry.TicketNumber,
+                error);
+        }
     }
 }
-

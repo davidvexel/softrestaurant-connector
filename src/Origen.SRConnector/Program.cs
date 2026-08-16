@@ -1,3 +1,4 @@
+using System.Net.Http.Headers;
 using Microsoft.Extensions.Options;
 using Origen.SRConnector.Configuration;
 using Origen.SRConnector.Infrastructure.Api;
@@ -29,7 +30,24 @@ builder.Services
     .Bind(builder.Configuration.GetSection(SoftRestaurantOptions.SectionName))
     .ValidateDataAnnotations()
     .ValidateOnStart();
-builder.Services.Configure<ApiOptions>(builder.Configuration.GetSection(ApiOptions.SectionName));
+builder.Services
+    .AddOptions<ApiOptions>()
+    .Bind(builder.Configuration.GetSection(ApiOptions.SectionName))
+    .ValidateDataAnnotations()
+    .Validate(
+        options => options.Mode.Equals("Mock", StringComparison.OrdinalIgnoreCase)
+            || options.Mode.Equals("Http", StringComparison.OrdinalIgnoreCase),
+        "Api:Mode must be Mock or Http.")
+    .Validate(
+        options => !options.Mode.Equals("Http", StringComparison.OrdinalIgnoreCase)
+            || Uri.TryCreate(options.BaseUrl, UriKind.Absolute, out var uri)
+            && uri.Scheme == Uri.UriSchemeHttps,
+        "Api:BaseUrl must be an absolute HTTPS URL when Api:Mode is Http.")
+    .Validate(
+        options => !options.Mode.Equals("Http", StringComparison.OrdinalIgnoreCase)
+            || !string.IsNullOrWhiteSpace(options.ApiKey),
+        "Api:ApiKey is required when Api:Mode is Http.")
+    .ValidateOnStart();
 builder.Services
     .AddOptions<ConnectorOptions>()
     .Bind(builder.Configuration.GetSection(ConnectorOptions.SectionName))
@@ -38,7 +56,22 @@ builder.Services
 builder.Services.AddSingleton<ISoftRestaurantRepository, SoftRestaurantRepository>();
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<ISaleOutboxRepository, SqliteSaleOutboxRepository>();
-builder.Services.AddSingleton<ILoyaltyApiClient, MockLoyaltyApiClient>();
+var apiMode = builder.Configuration[$"{ApiOptions.SectionName}:Mode"] ?? "Mock";
+if (apiMode.Equals("Http", StringComparison.OrdinalIgnoreCase))
+{
+    builder.Services.AddHttpClient<ILoyaltyApiClient, HttpLoyaltyApiClient>((services, client) =>
+    {
+        var apiOptions = services.GetRequiredService<IOptions<ApiOptions>>().Value;
+        client.BaseAddress = new Uri(apiOptions.BaseUrl.TrimEnd('/') + "/");
+        client.Timeout = TimeSpan.FromSeconds(apiOptions.TimeoutSeconds);
+        client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+        client.DefaultRequestHeaders.UserAgent.ParseAdd("Origen-SR-Connector/1.0");
+    });
+}
+else
+{
+    builder.Services.AddSingleton<ILoyaltyApiClient, MockLoyaltyApiClient>();
+}
 builder.Services.AddSingleton<ISaleSyncService, SaleSyncService>();
 builder.Services.AddSingleton<IOutboxDispatchService, OutboxDispatchService>();
 builder.Services.AddSingleton<ConnectorStatusService>();
@@ -67,9 +100,10 @@ try
     {
         var result = await host.Services.GetRequiredService<ILoyaltyApiClient>()
             .TestConnectionAsync(CancellationToken.None);
+        var apiClient = host.Services.GetRequiredService<ILoyaltyApiClient>();
         Console.WriteLine(result.Success
-            ? "API client: Mock enabled (HTTP disabled; no request was made)"
-            : $"API client test failed: {result.Error}");
+            ? $"API client: {apiClient.Name}; connection successful"
+            : $"API client: {apiClient.Name}; test failed: {result.Error}");
         return result.Success ? 0 : 1;
     }
 
@@ -85,7 +119,7 @@ try
         Console.WriteLine($"Sent sales: {status.Outbox.Counts.Sent}");
         Console.WriteLine($"Last sale detected: {status.Outbox.LastTicketDetected?.ToString() ?? "None"}");
         Console.WriteLine($"Last successful sync: {status.Outbox.LastSuccessfulSync?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") ?? "Never"}");
-        return status.SqlServer == "Connected" ? 0 : 1;
+        return status.SqlServer == "Connected" && status.ApiConnected ? 0 : 1;
     }
 
     await host.RunAsync();
