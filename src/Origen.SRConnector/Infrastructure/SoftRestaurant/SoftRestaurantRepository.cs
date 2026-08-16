@@ -29,35 +29,78 @@ public sealed class SoftRestaurantRepository(
 
         await using var connection = CreateConnection();
         await connection.OpenAsync(cancellationToken);
-        await using (var command = CreateReadCommand(connection, SoftRestaurantQueries.ClosedSales))
-        {
-            command.Parameters.Add(new SqlParameter("@since", SqlDbType.DateTime) { Value = since });
-            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-            while (await reader.ReadAsync(cancellationToken))
-            {
-                headers.Add(ReadHeader(reader));
-            }
-        }
 
-        var sales = new List<Sale>(headers.Count);
-        foreach (var header in headers)
+        await ReadHeadersAsync(
+            connection,
+            SoftRestaurantQueries.ClosedSales,
+            since,
+            historical: false,
+            headers,
+            cancellationToken);
+        await ReadHeadersAsync(
+            connection,
+            SoftRestaurantQueries.HistoricalClosedSales,
+            since,
+            historical: true,
+            headers,
+            cancellationToken);
+
+        // Una venta puede estar visible brevemente en ambas fuentes durante el corte.
+        // El ticket global es la identidad estable; se prefiere tempcheques si aparece en ambas.
+        var uniqueHeaders = headers
+            .GroupBy(header => header.TicketNumber)
+            .Select(group => group.OrderBy(header => header.IsHistorical).First())
+            .OrderBy(header => header.TicketNumber)
+            .ToList();
+
+        var sales = new List<Sale>(uniqueHeaders.Count);
+        foreach (var header in uniqueHeaders)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var payments = await ReadPaymentsAsync(connection, header.SrFolio, cancellationToken);
-            var items = await ReadItemsAsync(connection, header.SrFolio, cancellationToken);
+            var payments = await ReadPaymentsAsync(
+                connection,
+                header.RelatedFolio,
+                header.IsHistorical,
+                cancellationToken);
+            var items = await ReadItemsAsync(
+                connection,
+                header.RelatedFolio,
+                header.IsHistorical,
+                cancellationToken);
             sales.Add(header.ToSale(items, payments));
         }
 
         return sales;
     }
 
+    private async Task ReadHeadersAsync(
+        SqlConnection connection,
+        string query,
+        DateTime since,
+        bool historical,
+        ICollection<SaleHeader> headers,
+        CancellationToken cancellationToken)
+    {
+        await using var command = CreateReadCommand(connection, query);
+        command.Parameters.Add(new SqlParameter("@since", SqlDbType.DateTime) { Value = since });
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            headers.Add(ReadHeader(reader, historical));
+        }
+    }
+
     private async Task<IReadOnlyList<SalePayment>> ReadPaymentsAsync(
         SqlConnection connection,
         long folio,
+        bool historical,
         CancellationToken cancellationToken)
     {
         var payments = new List<SalePayment>();
-        await using var command = CreateReadCommand(connection, SoftRestaurantQueries.Payments);
+        var query = historical
+            ? SoftRestaurantQueries.HistoricalPayments
+            : SoftRestaurantQueries.Payments;
+        await using var command = CreateReadCommand(connection, query);
         command.Parameters.Add(new SqlParameter("@folio", SqlDbType.BigInt) { Value = folio });
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
@@ -76,10 +119,14 @@ public sealed class SoftRestaurantRepository(
     private async Task<IReadOnlyList<SaleItem>> ReadItemsAsync(
         SqlConnection connection,
         long folio,
+        bool historical,
         CancellationToken cancellationToken)
     {
         var items = new List<SaleItem>();
-        await using var command = CreateReadCommand(connection, SoftRestaurantQueries.Items);
+        var query = historical
+            ? SoftRestaurantQueries.HistoricalItems
+            : SoftRestaurantQueries.Items;
+        await using var command = CreateReadCommand(connection, query);
         command.Parameters.Add(new SqlParameter("@folio", SqlDbType.BigInt) { Value = folio });
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
@@ -118,24 +165,27 @@ public sealed class SoftRestaurantRepository(
         };
     }
 
-    private static SaleHeader ReadHeader(SqlDataReader reader)
+    private static SaleHeader ReadHeader(SqlDataReader reader, bool historical)
     {
-        var customerId = GetNullableString(reader, 4);
+        var offset = historical ? 1 : 0;
+        var customerId = GetNullableString(reader, 4 + offset);
         return new SaleHeader(
             reader.GetInt64(0),
-            reader.GetInt64(1),
-            reader.GetDateTime(2),
-            reader.GetDateTime(3),
-            customerId is null ? null : new CustomerReference(customerId, GetNullableString(reader, 5)),
-            GetNullableString(reader, 6),
-            GetNullableString(reader, 7),
-            GetDecimalOrZero(reader, 8),
-            GetDecimalOrZero(reader, 9),
-            GetDecimalOrZero(reader, 10),
-            GetDecimalOrZero(reader, 11),
-            GetDecimalOrZero(reader, 12),
-            GetNullableString(reader, 13),
-            GetNullableString(reader, 14));
+            historical ? reader.GetInt64(1) : reader.GetInt64(0),
+            Convert.ToInt64(reader.GetValue(1 + offset)),
+            reader.GetDateTime(2 + offset),
+            reader.GetDateTime(3 + offset),
+            customerId is null ? null : new CustomerReference(customerId, GetNullableString(reader, 5 + offset)),
+            GetNullableString(reader, 6 + offset),
+            GetNullableString(reader, 7 + offset),
+            GetDecimalOrZero(reader, 8 + offset),
+            GetDecimalOrZero(reader, 9 + offset),
+            GetDecimalOrZero(reader, 10 + offset),
+            GetDecimalOrZero(reader, 11 + offset),
+            GetDecimalOrZero(reader, 12 + offset),
+            GetNullableString(reader, 13 + offset),
+            GetNullableString(reader, 14 + offset),
+            historical);
     }
 
     private static string? GetNullableString(SqlDataReader reader, int ordinal)
@@ -160,6 +210,7 @@ public sealed class SoftRestaurantRepository(
 
     private sealed record SaleHeader(
         long SrFolio,
+        long RelatedFolio,
         long TicketNumber,
         DateTime OpenedAt,
         DateTime ClosedAt,
@@ -172,7 +223,8 @@ public sealed class SoftRestaurantRepository(
         decimal Tip,
         decimal TotalWithTip,
         string? OpeningUser,
-        string? PaymentUser)
+        string? PaymentUser,
+        bool IsHistorical)
     {
         internal Sale ToSale(IReadOnlyList<SaleItem> items, IReadOnlyList<SalePayment> payments) => new()
         {

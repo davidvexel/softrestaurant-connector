@@ -103,7 +103,15 @@ En modo `Http`, el comando llama a `GET /api/v1/connector` para validar dominio,
 dotnet run --project src/Origen.SRConnector -- run
 ```
 
-El proceso consulta la ventana configurada, inserta ventas nuevas en SQLite y procesa la Outbox mediante el cliente configurado. Una venta ya registrada no se vuelve a insertar aunque aparezca en ciclos posteriores.
+El proceso consulta la ventana configurada tanto en las tablas temporales como en las históricas, inserta ventas nuevas en SQLite y procesa la Outbox mediante el cliente configurado. Una venta ya registrada no se vuelve a insertar aunque aparezca en ciclos posteriores.
+
+La reconciliación posterior al corte usa exclusivamente estas fuentes confirmadas:
+
+- `cheques` para la cabecera;
+- `chequespagos` para los pagos, relacionados mediante el folio histórico;
+- `vwrepproductosvendidoscheques` para los productos, relacionados mediante el folio histórico.
+
+`cheques.numcheque` conserva el ticket global. Como `cheques.folio` cambia durante el corte, el payload utiliza `cheques.foliotempcheques` como `folio`; si este último fuera nulo, utiliza el folio histórico como respaldo. Si un ticket aparece simultáneamente en las fuentes temporal e histórica durante el corte, se procesa una sola vez y se prefiere la versión temporal. La Outbox vuelve a deduplicar mediante `source + location_id + ticket`.
 
 En Windows se recomienda configurar `DatabasePath` con una ruta absoluta y persistente. La carpeta debe existir o poder ser creada por la identidad que ejecute el conector. No guarde `connector.db` en una carpeta temporal.
 
@@ -194,7 +202,7 @@ El repositorio además rechaza cualquier texto de comando que no comience con `S
 - Las fechas se serializan con el valor local entregado por SQL Server, sin inventar una zona horaria.
 - Los renglones principales y modificadores se conservan individualmente.
 - `preciocatalogo` se publica como `unit_price`; `calcpreciomenosdescuento`, `iva`, `cardBrand`, mesa y usuarios se conservan en el modelo interno, pero no se incluyen en el payload conceptual actual.
-- `tempcheques.numcheque` se publica como `ticket` y es el identificador histórico global confirmado; `tempcheques.folio` se publica como `folio` y es el número operativo por turno. `WorkspaceId` no se consulta ni se publica.
+- `numcheque` se publica como `ticket` y es el identificador histórico global confirmado. En la fuente temporal, `tempcheques.folio` se publica como `folio`; en la histórica se usa `cheques.foliotempcheques`, porque `cheques.folio` cambia durante el corte. `WorkspaceId` no se consulta ni se publica.
 - SQL Server 2014 SP1 se conserva por compatibilidad obligatoria con SoftRestaurant; la negociación TLS 1.0 es una limitación conocida del entorno local.
 - La API real usa `POST https://app.origennatural.mx/api/v1/sales` con autenticación Bearer. `200` y `201` se consideran éxito.
-- TODO posterior al corte: confirmar identidad y relaciones en `cheques`, `chequespagos` y `vwrepproductosvendidoscheques` antes de implementar reconciliación histórica.
+- La reconciliación histórica fue confirmada con datos posteriores al corte: pagos y productos se relacionan mediante `cheques.folio`, mientras `foliotempcheques` conserva el folio operativo original.
